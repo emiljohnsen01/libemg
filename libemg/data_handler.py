@@ -12,6 +12,7 @@ import copy
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.axes import Axes
+from matplotlib.widgets import Button
 from scipy.ndimage import zoom
 from scipy.signal import decimate
 from matplotlib import pyplot
@@ -580,7 +581,8 @@ class OnlineDataHandler(DataHandler):
         self.shared_memory_items = shared_memory_items
         self.prepare_smm()
         self.log_signal = Event()
-        self.visualize_signal = Event()        
+        self.visualize_signal = Event()
+        self.pause_signal = Event()  # Add pause event        
         self.fi = None
         self.channel_mask = channel_mask
     
@@ -613,6 +615,12 @@ class OnlineDataHandler(DataHandler):
         self.visualize_signal.set()
         time.sleep(0.5)
         self.visualize_signal.clear()
+
+    def pause_visualization(self):
+        self.pause_signal.set()
+
+    def resume_visualization(self):
+        self.pause_signal.clear()
 
     def install_filter(self, fi):
         """Install a filter to be used on the online stream of data.
@@ -701,6 +709,8 @@ class OnlineDataHandler(DataHandler):
         pyplot.style.use('ggplot')
         plots = []
         fig, ax = pyplot.subplots(len(self.modalities), 1,squeeze=False)
+        total_samples = 0  # Track the total number of samples received
+
         def on_close(event):
             self.visualize_signal.set()
         fig.canvas.mpl_connect('close_event', on_close)
@@ -712,7 +722,25 @@ class OnlineDataHandler(DataHandler):
         
         fig.legend()
         
+        # Add pause/resume button
+        pause_ax = pyplot.axes([0.8, 0.01, 0.1, 0.075])
+        pause_button = Button(pause_ax, 'Pause', color='lightgoldenrodyellow', hovercolor='0.975')
+
+        def toggle_pause(event):
+            if self.pause_signal.is_set():
+                self.resume_visualization()
+                pause_button.label.set_text('Pause')
+            else:
+                self.pause_visualization()
+                pause_button.label.set_text('Resume')
+
+        pause_button.on_clicked(toggle_pause)
+
         def update(frame):
+            nonlocal total_samples
+            if self.pause_signal.is_set():
+                return plots,  # Skip updating if paused
+
             data, _ = self.get_data(N=0,filter=True)
             line = 0
             for i, mod in enumerate(self.modalities):
@@ -722,7 +750,8 @@ class OnlineDataHandler(DataHandler):
                 if len(data[mod]) > num_samples:
                     data[mod] = data[mod][:num_samples,:]
                 if len(data[mod]) > 0:
-                    x_data = list(range(0,data[mod].shape[0]))
+                    #x_data = list(range(0,data[mod].shape[0]))
+                    x_data = list(range(total_samples, total_samples + data[mod].shape[0]))
                     num_channels = data[mod].shape[1]
                     for j in range(0,num_channels):
                         y_data = data[mod][:,j]
@@ -732,6 +761,7 @@ class OnlineDataHandler(DataHandler):
                 ax[i][0].relim()
                 ax[i][0].autoscale_view()
                 ax[i][0].set_title(self.modalities[i])
+            total_samples += data[mod].shape[0]  # Update the total number of samples received
             return plots,
     
         while True:

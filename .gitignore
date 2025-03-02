@@ -70,3 +70,5 @@ MLPR.py
 docs/Makefile
 sifibridge-*
 *.pyc
+3_11_venv/
+3_10_venv/
