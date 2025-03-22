@@ -704,27 +704,32 @@ class OnlineDataHandler(DataHandler):
             p.start()
 
     def _visualize(self, num_samples):
+        total_samples = 1  # Track the total number of samples received
+        sampling_frequency = 2000  # Assuming a sampling frequency of 2000 Hz
+        update_interval = 0.1  # Update interval in seconds (100 milliseconds)
         self.prepare_smm()
 
         pyplot.style.use('ggplot')
         plots = []
         fig, ax = pyplot.subplots(len(self.modalities), 1,squeeze=False)
-        total_samples = 0  # Track the total number of samples received
-
+        
         def on_close(event):
             self.visualize_signal.set()
+
         fig.canvas.mpl_connect('close_event', on_close)
         fig.suptitle('Raw Data', fontsize=16)
         for i,mod in enumerate(self.modalities):
-            num_channels = self.smm.get_variable(mod).shape[1]
+            data = self.smm.get_variable(mod) #fetch the data from shared memory
+            if self.channel_mask is not None:
+                data = data[:, self.channel_mask] #filter out channels using the mask
+            num_channels = data.shape[1]
             for j in range(0,num_channels):
                 plots.append(ax[i][0].plot([],[],label=mod+"_CH"+str(j+1)))
-        
         fig.legend()
         
         # Add pause/resume button
         pause_ax = pyplot.axes([0.8, 0.01, 0.1, 0.075])
-        pause_button = Button(pause_ax, 'Pause', color='lightgoldenrodyellow', hovercolor='0.975')
+        pause_button = Button(pause_ax, 'Pause', color='cornflowerblue', hovercolor='0.5')
 
         def toggle_pause(event):
             if self.pause_signal.is_set():
@@ -751,7 +756,7 @@ class OnlineDataHandler(DataHandler):
                     data[mod] = data[mod][:num_samples,:]
                 if len(data[mod]) > 0:
                     #x_data = list(range(0,data[mod].shape[0]))
-                    x_data = list(range(total_samples, total_samples + data[mod].shape[0]))
+                    x_data = [(total_samples*update_interval) / sampling_frequency + (i*update_interval) / sampling_frequency for i in range(data[mod].shape[0])] # Time in seconds
                     num_channels = data[mod].shape[1]
                     for j in range(0,num_channels):
                         y_data = data[mod][:,j]
@@ -761,6 +766,11 @@ class OnlineDataHandler(DataHandler):
                 ax[i][0].relim()
                 ax[i][0].autoscale_view()
                 ax[i][0].set_title(self.modalities[i])
+                ax[i][0].set_xlabel('Time [s]')
+                ax[i][0].set_xlim(xmin=x_data[0]-0.001,xmax=x_data[-1]) # the subtraction in xmin is for nicer visualization
+                ax[i][0].set_ylim(ymin=-0.0005,ymax=0.0005)
+                if self.modalities[i] == 'emg':
+                    ax[i][0].set_ylabel('Voltage [V]')
             total_samples += data[mod].shape[0]  # Update the total number of samples received
             return plots,
     
@@ -783,6 +793,9 @@ class OnlineDataHandler(DataHandler):
         y_axes: list (optional)
             A list of two elements consisting of the y-axes.
         """
+        total_samples = 0  # Track the total number of samples received
+        sampling_frequency = 2000  # Assuming a sampling frequency of 2000 Hz
+        update_interval = 0.1  # Update interval in seconds (100 milliseconds)
         self.prepare_smm()
         pyplot.style.use('ggplot')
         while not self._check_streaming():
@@ -792,8 +805,10 @@ class OnlineDataHandler(DataHandler):
         fig.suptitle('Raw Data', fontsize=16)
         for i in range(0,len(channels)):
             emg_plots.append(ax.plot([],[],label="CH"+str(channels[i])))
+        fig.legend()
 
         def update(frame):
+            nonlocal total_samples
             data, _ = self.get_data()
             data = data['emg']
             data = data[:,channels]
@@ -801,17 +816,19 @@ class OnlineDataHandler(DataHandler):
             if len(data) > num_samples:
                 data = data[:num_samples,:]
             if len(data) > 0:
-                x_data = list(range(0,data.shape[0]))
-            
+                #x_data = list(range(0,data.shape[0]))
+                x_data = [(total_samples*update_interval) / sampling_frequency + (i*update_interval) / sampling_frequency for i in range(data.shape[0])] # Time in seconds
                 for i in range(data.shape[1]):
                     y_data = data[:,i]
                     emg_plots[i][0].set_data(x_data, y_data +inter_channel_amount*i)
                 fig.gca().relim()
                 fig.gca().autoscale_view()
+            total_samples += data.shape[0]  # Update the total number of samples received
             return emg_plots,
-
+        
         animation = FuncAnimation(fig, update, interval=100)
         pyplot.show()
+            
     
     def visualize_heatmap(self, num_samples = 500, feature_list = None, remap_function = None, cmap = None):
         """Visualize heatmap representation of EMG signals. This is commonly used to represent HD-EMG signals.
