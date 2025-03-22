@@ -82,7 +82,7 @@ class Filter:
         
         self.install_filters(filter_dictionary=filter_dictionary)
         filter_dictionary={"name":"notch",
-                            "cutoff": 60,
+                            "cutoff": 50,
                             "bandwidth": 3 }
         self.install_filters(filter_dictionary=filter_dictionary)
 
