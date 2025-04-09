@@ -707,6 +707,7 @@ class OnlineDataHandler(DataHandler):
         total_samples = 1  # Track the total number of samples received
         sampling_frequency = 2000  # Assuming a sampling frequency of 2000 Hz
         update_interval = 0.1  # Update interval in seconds (100 milliseconds)
+        num_labels = 10
         self.prepare_smm()
 
         pyplot.style.use('ggplot')
@@ -726,7 +727,7 @@ class OnlineDataHandler(DataHandler):
             for j in range(0,num_channels):
                 plots.append(ax[i][0].plot([],[],label=mod+"_CH"+str(j+1)))
         fig.legend()
-        
+
         # Add pause/resume button
         pause_ax = pyplot.axes([0.8, 0.01, 0.1, 0.075])
         pause_button = Button(pause_ax, 'Pause', color='cornflowerblue', hovercolor='0.5')
@@ -756,22 +757,25 @@ class OnlineDataHandler(DataHandler):
                     data[mod] = data[mod][:num_samples,:]
                 if len(data[mod]) > 0:
                     #x_data = list(range(0,data[mod].shape[0]))
-                    x_data = [(total_samples*update_interval) / sampling_frequency + (i*update_interval) / sampling_frequency for i in range(data[mod].shape[0])] # Time in seconds
+                    x_data = [(num_samples/sampling_frequency)*((total_samples*update_interval) / num_samples + (i) / num_samples) for i in range(num_samples)] # Time in seconds
                     num_channels = data[mod].shape[1]
                     for j in range(0,num_channels):
                         y_data = data[mod][:,j]
                         plots[line][0].set_data(x_data, y_data +inter_channel_amount*j)
                         line += 1
             for i in range(len(self.modalities)):
-                ax[i][0].relim()
-                ax[i][0].autoscale_view()
+                #ax[i][0].relim()
+                #ax[i][0].autoscale_view()
+                x_labels = [ x_data[i * (len(x_data) - 1) // (num_labels - 1)] for i in range(num_labels)]
+                x_labels_round = [round(x_labels[i],4) for i in range(len(x_labels))]
                 ax[i][0].set_title(self.modalities[i])
                 ax[i][0].set_xlabel('Time [s]')
                 ax[i][0].set_xlim(xmin=x_data[0]-0.001,xmax=x_data[-1]) # the subtraction in xmin is for nicer visualization
+                ax[i][0].set_xticks(x_labels,x_labels_round)
                 ax[i][0].set_ylim(ymin=-0.0005,ymax=0.0005)
                 if self.modalities[i] == 'emg':
                     ax[i][0].set_ylabel('Voltage [V]')
-            total_samples += data[mod].shape[0]  # Update the total number of samples received
+            total_samples += num_samples  # Update the total number of samples received
             return plots,
     
         while True:
