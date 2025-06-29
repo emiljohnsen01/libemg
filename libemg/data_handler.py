@@ -687,38 +687,44 @@ class OnlineDataHandler(DataHandler):
         
         print("Analysis sucessfully complete. ODH process has stopped.")
 
-    def visualize(self, num_samples=500, block=True):
+    def visualize(self, num_samples=500, y_lim_min=-0.5, y_lim_max=0.5, block=True):
         """Visualize the incoming raw EMG in a plot (all channels together).
 
         Parameters
         ----------
         num_samples: int (optional), default=500
             The number of samples to show in the plot.
+        y_lim_min: float (optional), default=-0.5
+            Min y-axis limit (will decrease if signal goes below limit).
+        y_lim_max: float (optional), default=0.5
+            Max y-axis limit (will increase if signal goes above limit).
         block: Boolean (optional), default=False
             Blocks the main thread if True.
         """
         if block:
-            self._visualize(num_samples)
+            self._visualize(num_samples,y_lim_min, y_lim_max)
         else:
-            p = Process(target=self._visualize, kwargs={"num_samples":num_samples}, daemon=True)
+            p = Process(target=self._visualize, kwargs={"num_samples":num_samples, "y_lim_min":y_lim_min, "y_lim_max":y_lim_max}, daemon=True)
             p.start()
 
-    def _visualize(self, num_samples):
-        total_samples = 1  # Track the total number of samples received
+    def _visualize(self, num_samples, y_lim_min, y_lim_max):
+        total_samples = 0  # Track the total number of samples received
         sampling_frequency = 2000  # Assuming a sampling frequency of 2000 Hz
         update_interval = 0.1  # Update interval in seconds (100 milliseconds)
-        num_labels = 10
+        #num_labels = math.ceil((num_samples/sampling_frequency)*10) # num time labels to use along x-axis when plotting
         self.prepare_smm()
 
         pyplot.style.use('ggplot')
+        pyplot.rcParams.update({'font.size':18})
+        
         plots = []
-        fig, ax = pyplot.subplots(len(self.modalities), 1,squeeze=False)
+        fig, ax = pyplot.subplots(len(self.modalities), 1,squeeze=False,figsize=(12,8))
         
         def on_close(event):
             self.visualize_signal.set()
 
         fig.canvas.mpl_connect('close_event', on_close)
-        fig.suptitle('Raw Data', fontsize=16)
+        fig.suptitle('Raw Data', fontsize=18)
         for i,mod in enumerate(self.modalities):
             data = self.smm.get_variable(mod) #fetch the data from shared memory
             if self.channel_mask is not None:
@@ -729,7 +735,7 @@ class OnlineDataHandler(DataHandler):
         fig.legend()
 
         # Add pause/resume button
-        pause_ax = pyplot.axes([0.8, 0.01, 0.1, 0.075])
+        pause_ax = pyplot.axes([0.8, 0, 0.1, 0.065])
         pause_button = Button(pause_ax, 'Pause', color='cornflowerblue', hovercolor='0.5')
 
         def toggle_pause(event):
@@ -744,43 +750,50 @@ class OnlineDataHandler(DataHandler):
 
         def update(frame):
             nonlocal total_samples
-            if self.pause_signal.is_set():
-                return plots,  # Skip updating if paused
+            if self.pause_signal.is_set(): # if paused, skip update
+                return plots, 
 
             data, _ = self.get_data(N=0,filter=True)
             line = 0
-            for i, mod in enumerate(self.modalities):
-                for j in range(data[mod].shape[1]):
+            for i, mod in enumerate(self.modalities): #iterate over each modality
+                num_channels = data[mod].shape[1]
+                for j in range(num_channels): # iterate over each channel and normlaize
                     data[mod][:,j] = data[mod][:,j] - np.mean(data[mod][:,j])
                 inter_channel_amount = 1.5 * np.max(data[mod])
-                inter_channel_amount = 0
-                if len(data[mod]) > num_samples:
+                #inter_channel_amount = 0
+                if len(data[mod]) > num_samples: # slice to num_samples
                     data[mod] = data[mod][:num_samples,:]
-                if len(data[mod]) > 0:
-                    #x_data = list(range(0,data[mod].shape[0]))
-                    x_data = [(num_samples/sampling_frequency)*((total_samples*update_interval) / num_samples + (i) / num_samples) for i in range(num_samples)] # Time in seconds
-                    num_channels = data[mod].shape[1]
+                if len(data[mod]) > 0: # set data for x- and y-axes
+                    x_data = [((total_samples*update_interval) / num_samples + (i /sampling_frequency)) for i in range(0,num_samples)] #time in seconds
+                    #x_data = x_data[::-1]
                     for j in range(0,num_channels):
                         y_data = data[mod][:,j]
+                        y_data = y_data[::-1]
+                        if mod == 'emg': #if modality is emg, rescale to mV
+                            y_data = 1000*y_data
                         plots[line][0].set_data(x_data, y_data +inter_channel_amount*j)
                         line += 1
-            for i in range(len(self.modalities)):
-                #ax[i][0].relim()
-                #ax[i][0].autoscale_view()
-                x_labels = [ x_data[i * (len(x_data) - 1) // (num_labels - 1)] for i in range(num_labels)]
-                x_labels_round = [round(x_labels[i],4) for i in range(len(x_labels))]
+            for i in range(len(self.modalities)): #iterate over each modality plot and update
+                #x_labels = [ x_data[j * (len(x_data) - 1) // (num_labels - 1)] for j in range(num_labels)] # extract evenly spaced labels
+                #x_labels_round = [round(x_labels[j],1) for j in range(len(x_labels))] # x_labels have varying and too many decimals. Round off
                 ax[i][0].set_title(self.modalities[i])
                 ax[i][0].set_xlabel('Time [s]')
-                ax[i][0].set_xlim(xmin=x_data[0]-0.001,xmax=x_data[-1]) # the subtraction in xmin is for nicer visualization
-                ax[i][0].set_xticks(x_labels,x_labels_round)
-                ax[i][0].set_ylim(ymin=-0.0005,ymax=0.0005)
+                ax[i][0].set_xlim(xmin=x_data[0],xmax=x_data[-1]) # the subtraction in xmin is for nicer visualization
+                #ax[i][0].set_xticks(x_labels,x_labels_round)
+                
+                ax[i][0].locator_params(axis='x',nbins=10)
                 if self.modalities[i] == 'emg':
-                    ax[i][0].set_ylabel('Voltage [V]')
+                    ax[i][0].set_ylabel('Voltage [mV]')
+                    y_min = 1000*(np.amin(data['emg']))
+                    y_max = 1000*(np.amax(data['emg']))
+                    y_abs = max(abs(y_max),abs(y_min))
+                    ax[i][0].set_ylim(ymin=min(y_lim_min,-y_abs),ymax=max(y_lim_max,y_abs))
             total_samples += num_samples  # Update the total number of samples received
             return plots,
     
         while True:
             animation = FuncAnimation(fig, update, interval=100, repeat=False)
+            #pyplot.tight_layout()
             pyplot.show()
             if self.visualize_signal.is_set():
                 print("ODH->visualize ended.")
