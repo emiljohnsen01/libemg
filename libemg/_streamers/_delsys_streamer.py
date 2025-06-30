@@ -4,6 +4,7 @@ import numpy as np
 import pickle
 from libemg.shared_memory_manager import SharedMemoryManager
 from multiprocessing import Process, Event, Lock
+import traceback
 
 class DelsysEMGStreamer(Process):
     """
@@ -81,6 +82,7 @@ class DelsysEMGStreamer(Process):
         self.timeout = timeout
 
         self._min_recv_size = 16 * self.BYTES_PER_CHANNEL
+        self.imu_size = 144 * self.BYTES_PER_CHANNEL
 
     def connect(self):
         # create command socket and consume the servers initial response
@@ -139,10 +141,15 @@ class DelsysEMGStreamer(Process):
                     for e in self.emg_handlers:
                         e(data)
                 if self.imu:
-                    packet = self._aux_socket.recv(self._min_recv_size)
-                    data = np.asarray(struct.unpack('<'+'f'*16, packet))
-                    assert np.any(data!=0), "IMU not currently working"
-                    data = data
+                    packet = self._aux_socket.recv(self.imu_size)
+                    data = np.asarray(struct.unpack('<'+'f'*144, packet))
+                    #assert np.any(data!=0), "IMU not currently working"
+                    imu_filter = []
+                    for c in self.channel_list:
+                        start_idx = c*9 # 3ACC+3GYR+3empty
+                        for i in range(6):
+                            imu_filter.append(start_idx+i)
+                    data = data[imu_filter]
                     if len(data.shape)==1:
                         data = data[None, :]
                     for i in self.imu_handlers:
@@ -151,6 +158,7 @@ class DelsysEMGStreamer(Process):
 
             except Exception as e:
                 print("Error Occurred: " + str(e))
+                #traceback.print_exc()
                 continue
 
             if self.signal.is_set():

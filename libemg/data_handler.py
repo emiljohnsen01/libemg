@@ -766,6 +766,7 @@ class OnlineDataHandler(DataHandler):
                 if len(data[mod]) > 0: # set data for x- and y-axes
                     x_data = [((total_samples*update_interval) / num_samples + (i /sampling_frequency)) for i in range(0,num_samples)] #time in seconds
                     #x_data = x_data[::-1]
+                    x_data = list(range(0,data[mod].shape[0]))
                     for j in range(0,num_channels):
                         y_data = data[mod][:,j]
                         y_data = y_data[::-1]
